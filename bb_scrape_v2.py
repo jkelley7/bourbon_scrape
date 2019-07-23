@@ -9,6 +9,7 @@ import datetime
 import sqlite3
 from sqlite3 import Error
 from sqlite_funcs import *
+from itertools import chain
 
 import os
 # Import smtplib for the actual sending function
@@ -19,6 +20,11 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+#set the column width wide
+pd.set_option('display.max_colwidth',200)
+today = datetime.datetime.today()
+time_of_run = today.strftime("%m/%d/%y %H:%M")
+
 def main():
     bb_dbase_filename = "./databases/break_bour_db.db"
 
@@ -26,7 +32,7 @@ def main():
     page_link = 'https://breakingbourbon.com/release-list.html'
     page_response = requests.get(page_link,verify=False, timeout=5)
     page_content = BeautifulSoup(page_response.content, "html.parser")
-    date_updated = page_content.find('span',{'id':'u130963'}).getText().strip(' ')
+    date_updated = page_content.find('div',{'class':'desktoptext center'}).getText()
     date_updated2 = re.findall(r'\d{2}/\d{2}/\d{2}',date_updated)[0]
     datetime_format = datetime.datetime.strptime(date_updated2, '%m/%d/%y')
     
@@ -50,7 +56,7 @@ def main():
         write_file(new_data = date_updated2)
         
     else:
-        print('No Updates')
+        print(f'{time_of_run} No Updates')
 
     return date_updated2
 
@@ -67,9 +73,10 @@ def read_file(file_name ='last_update.txt', loc = './webscraping/'):
 
     return last_updated
 
-def email(df, sender, reciever):
+def email(df, sender , reciever):
     # Create the container (outer) email message.
     server = smtplib.SMTP('smtp.gmail.com', 587)
+    server.ehlo()
     server.starttls()
     server.login(os.environ['GMAIL_UID'], os.environ['GMAIL_SID'])
     msg = MIMEMultipart('mixed')
@@ -92,75 +99,170 @@ def email(df, sender, reciever):
     msg.attach(html_part)
     msg.attach(pd_table)
     msg.as_string()
-    #original code
-    #text = "There are new to updates to Breaking Bourbons release calendar. Check out the "
-    #textpart = MIMEText(text, 'plain')
-    #text2 = MIMEText('<a href="http://breakingbourbon.com/release-list.html">release calendar</a>','html')
-    #msg.attach(textpart)
-    #msg.attach(text2)
-    #msg.as_string()
     server.send_message(msg)
 
-def find_new_update_info(page_content):
-    """Takes the page content aka a beautiful soups page response content
+def scrape_page(page_content):
+    """ This takes in the page content from beautiful soup, scrapes the page and returns a data frame containing date scrape, month of release, product and sub details of product
+    :Params
+    -----------
+    page_content - beautiful soup scrapped web site
     
-    :param page_content: a beautiful soup object of a parse html page"""
-    
-    product_list = []
-    sub_cat = []
-    cat_id = []
-    bb_prod_id = []
-    date_run = []
-    sample = page_content.findAll('p')
-    for i in sample:
-        find_this = re.compile(r'\[new', flags= re.IGNORECASE)
-        in_this_string = i.getText()
-        if find_this.search(in_this_string) is not None:
-            str_len = len(in_this_string)
-            found = find_this.search(in_this_string)
-            product_list.append(in_this_string[:found.span()[0]-1])
-            sub_cat.append(i.findNextSibling().text[1:])
-            cat_id.append(i.attrs['id'])
-            bb_prod_id.append(i.findChild().attrs['id'])
-            date_run.append(datetime.date.today())
-    
-    return list(zip(date_run,bb_prod_id,product_list, sub_cat))
+    :returns
+    ------------
+    dfs - a data frame containing date scrapped, month of release, product and sub details of product"""
+    month = []
+    month_prods = []
+    dfs = pd.DataFrame([],columns=['month', 'product','product_desc'])
+    for div in page_content.body.find_all_next('div',{'class':'month-div'}):
+        month_prods = []
+        # get the month name in the review header
+        print(div.find_next('div',{'class':'reviewheader'}).get_text())
+        month_val = div.find_next('div',{'class':'reviewheader'}).get_text(strip=True)
+        month.append(month_val)
+        #find the desktop text as this is where everthing is
+        text_holder = div.find_next('div',{'class':'desktoptext'})
+        month_prods.extend(text_holder.get_text(separator='<br>', strip=True)
+                      #.replace('<br>',',')
+                      .strip(' ')
+                      .split('<br>'))
+        #month_prods = list(chain.from_iterable(month_prods))
+        # remove the u200d label
+        month_prods = remove_u200d(month_prods)
+        # check for zero length strings
+        month_prods = check_list_for_zeros(month_prods)
+        # remove the term bottle labels
+        month_prods = remove_bottle_label(month_prods)
+        # split the list and make df
+        dfs = pd.concat([dfs,split_list_prod_prod_desc(month_prods,month_val)], ignore_index=True)
+    return dfs
 
-def check_and_insert(conn, list_to_insert):
-    """This function checks if what was scrapped is already inserted
-    :param conn: a connection to a database
-    :param list_to_insert: a zipped list you would like to insert"""
+def check_and_insert(conn, df, cols_to_check = ['date_posted','product','month'], cols_to_insert = ['product','product_desc','month']):
+    """Check to see if what we found today has already been added. If it hasn't been added then add it
+    :Params
+    -------------
+    conn - a connection to a database
+    df - a pandas dataframe of new scrapped products
+    cols_to_check - cols to check to see if the product is in the database
+    cols_to_insert - cols to insert into the database if the product is not in the database
+    
+    :returns
+    --------------
+    Nothing data is added to the database
+    """
     curs = conn.cursor()
     
-    for i in list_to_insert:
-        curs.execute("select * from new_whisky where 1=1 and product_desc = ? and product_sub_desc = ?",i[2:])
+    for rec in df.to_records():
+        print(rec)
+        curs.execute("select * from new_whisky where 1=1 and date_posted = ? and product = ? and month = ?",rec[cols_to_check])
         double_check = curs.fetchone()
         if double_check is None:
-            curs.execute("INSERT INTO new_whisky (date_posted, bb_prod_id, product_desc, product_sub_desc) VALUES(?,?,?,?)",i)
+            curs.execute("INSERT INTO new_whisky (product, product_desc, month) VALUES(?,?,?)",rec[cols_to_insert])
         else:
-            print('Nothing to insert')
+            print('nothing to insert')
     conn.commit()
 
+
 def sql_latest_updates(conn,sql):
-    """Returns the lastest data and converts it into pandas dataframe
-    
-    :params conn: a sqlite3 database connection
-    :param sql: the sql string to query from the database"""
+    """Returns the lastest data"""
     data = pd.read_sql(sql,conn)
     return data
 
 def today_query():
-    """Just query today and yesterday"""
+    """Returns anything that was inserted into the table today"""
+    
     qry_today = """
                 SELECT
                 date_posted,
-                product_desc AS product_name,
-                product_sub_desc AS product_details
+                month AS Month_release,
+                product AS product_name,
+                product_desc AS product_details
 
                 FROM new_whisky
                 WHERE
                 date(date_posted) >= date('now','-1 day')"""
     return qry_today
+
+def remove_u200d(list_):
+    """Remove u200d values in a list"""
+    list_ = [i.strip('\u200d') for i in list_]
+    return list_
+
+def pop_empties(list_,len_var = 1):
+    """
+    Pops off un-neccasry spaces
+    :Params
+    ---------
+    list_ - a list to cycle thru
+    
+    :returns
+    ---------
+    list_ - your cleaned up list
+    """
+    for idx, ls in enumerate(list_):
+        if len(list_[idx]) <= len_var:
+            list_.pop(idx)
+    return list_
+
+def check_list_for_zeros(list_):
+    """Check list for any string with a length of 0
+    returns:
+    ----------
+    a list"""
+    if len(min(list_,key=len)) <= 1 and len(list_) > 0:
+        return check_list_for_zeros(pop_empties(list_))
+    else:
+        return list_
+
+def remove_bottle_label(list_, removal_val = 'bottlelabel'):
+    """Removes the words bottle label from the list
+    removal value must be one word
+    """
+    for idx, value in enumerate(list_):
+        word = (list_[idx]
+            .lower()
+            .strip(' ')
+            .replace(' ',''))
+        if word == removal_val or word == removal_val + 's' :
+            list_.pop(idx)
+    return list_
+
+def split_list_prod_prod_desc(list_, month):
+    """This takes our list and split it into products and product descriptions"""
+    sub_prod = []
+    for idx, _ in enumerate(list_):
+        if list_[idx][0] == '-':
+            sub_prod.append(list_[idx])
+            list_.pop(idx)
+        elif idx > 0:
+            #product.append(test_prod[idx])
+            sub_prod.append('')
+        else:
+            pass
+
+    dfs = (pd.DataFrame([[month]*len(list_),list_, sub_prod])
+     .T
+     .rename({0:'month',
+             1:'product',
+             2:'product_desc'},axis = 1)
+    )
+    return dfs
+
+def find_new_products(df):
+    """ Take a data frame of all products and find the new products
+    :Params
+    -----------
+    df - a pandas data frame with month, product and product description
+    
+    :Returns
+    ------------
+    new_df - a new pandas dataframe with just new products"""
+    df['date_posted'] = pd.to_datetime(datetime.date.today(), format='%Y-%m-%d')
+    df['date_posted'] = df.date_posted.dt.date
+    df = df[['date_posted','month','product','product_desc']]
+    
+    new_df = df[df['product'].str.contains(r'\[new',case = False, regex=True)]
+    new_df['product'] = new_df['product'].str.replace(r'\[NEW]','',regex=True)
+    return new_df
 
 #run this thang!
 main()
