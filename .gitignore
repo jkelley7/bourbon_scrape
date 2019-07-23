@@ -1,0 +1,8 @@
+*.ipynb
+*.txt
+!last_update.txt
+*.json
+*-checkpoint.py
+*.csv
+*.bat
+debug.log
