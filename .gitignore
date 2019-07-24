@@ -6,3 +6,4 @@
 *.csv
 *.bat
 debug.log
+*.pyc
