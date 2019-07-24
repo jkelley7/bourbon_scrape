@@ -7,3 +7,4 @@
 *.bat
 debug.log
 *.pyc
+bb_scrape.py
