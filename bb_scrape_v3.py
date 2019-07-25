@@ -64,12 +64,12 @@ def main():
     return date_updated2
 
 
-def write_file(file_name ='last_update.txt', loc = './webscraping/',new_data = '1/1/2019'):
+def write_file(file_name ='last_update.txt', loc = '../webscraping/',new_data = '1/1/2019'):
     file = open(loc+file_name,'w')
     file.write(new_data)
     file.close()
 
-def read_file(file_name ='last_update.txt', loc = './webscraping/'):
+def read_file(file_name ='last_update.txt', loc = '../webscraping/'):
     new_file = open(loc+file_name,'r')
     last_updated = new_file.readline()
 
