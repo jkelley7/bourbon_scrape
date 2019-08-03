@@ -191,7 +191,7 @@ def today_query():
 
                 FROM new_whisky
                 WHERE
-                date(date_posted) > date('now','-1 day')"""
+                date(date_posted) > date('now','-5 day')"""
     return qry_today
 
 def remove_u200d(list_):
@@ -273,7 +273,7 @@ def find_new_products(df):
     df = df[['date_posted','month','product','product_desc']]
     
     new_df = df[df['product'].str.contains(r'\[new',case = False, regex=True)]
-    new_df['product'] = new_df['product'].str.replace(r'\[NEW]','',regex=True)
+    new_df['product'] = new_df['product'].str.replace(r'\[NEW]','', case = False)
     return new_df
 
 #run this thang!
