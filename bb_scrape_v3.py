@@ -253,9 +253,9 @@ def split_list_prod_prod_desc(list_, month):
 
     dfs = (pd.DataFrame([[month]*len(list_),list_, sub_prod])
      .T
-     .rename({0:'month',
+     .rename(columns = {0:'month',
              1:'product',
-             2:'product_desc'},axis = 1)
+             2:'product_desc'})
     )
     return dfs
 
