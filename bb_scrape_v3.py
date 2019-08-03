@@ -38,10 +38,10 @@ def main():
     
     prev_refresh = read_file()
     if date_updated2 != prev_refresh:
-        #scrape the page and find all the products
+        # scrape the page and find all the products
         prods_df = scrape_page(page_content)
         
-        #create the connection
+        # create the connection
         conn = create_connection(bb_dbase_filename)
         
         # show me the new ones
@@ -50,8 +50,11 @@ def main():
         # Check the database to see if they're in there, if not add them
         check_and_insert(conn,new_df)
 
-        #find the latest updates
+        # find the latest updates
         new_prod_to_email = sql_latest_updates(conn, today_query())
+        
+        # because sometimes we have dups
+        new_prod_to_email = new_prod_to_email.drop_duplicates(keep='first')
 
         # email the sucker
         email(new_prod_to_email)
@@ -153,7 +156,7 @@ def check_and_insert(conn, df, cols_to_check = ['product','month'], cols_to_inse
     curs = conn.cursor()
     
     recs_to_insert = []
-    df_records = df.to_records()
+    df_records = df.to_records(index=False)
     
     check_b4_insert = df_records[cols_to_check]
     insert_recs = df_records[cols_to_insert]
@@ -162,14 +165,14 @@ def check_and_insert(conn, df, cols_to_check = ['product','month'], cols_to_inse
         print(rec)
         curs.execute("select * from new_whisky where 1=1 and product = ? and month = ?",rec)
         double_check = curs.fetchone()
-        recs_to_insert.append(double_check != None)
+        recs_to_insert.append(double_check == None)
     if any(recs_to_insert):
         new_additions = insert_recs[recs_to_insert]
-        for rec in new_additions:
-            print(rec)
-        for rec in new_additions:
-            curs.execute("INSERT INTO new_whisky (product, product_desc, month) VALUES(?,?,?)",rec)
-        conn.commit()
+        for new_add in new_additions:
+            print(new_add)
+        for new_add in new_additions:
+            curs.execute("INSERT INTO new_whisky (product, product_desc, month) VALUES(?,?,?)",new_add)
+            conn.commit()
     else:
         print('nothing to insert')
 
@@ -191,7 +194,7 @@ def today_query():
 
                 FROM new_whisky
                 WHERE
-                date(date_posted) > date('now','-5 day')"""
+                date(date_posted) > date('now','-1 day')"""
     return qry_today
 
 def remove_u200d(list_):
