@@ -9,3 +9,4 @@ debug.log
 *.pyc
 bb_scrape.py
 bourbondata.db
+/logs
