@@ -10,6 +10,7 @@ import sqlite3
 from sqlite3 import Error
 from sqlite_funcs import *
 from itertools import chain
+import logging
 
 import os
 # Import smtplib for the actual sending function
@@ -25,8 +26,10 @@ pd.set_option('display.max_colwidth',200)
 today = datetime.datetime.today()
 time_of_run = today.strftime("%m/%d/%y %H:%M")
 
+
 def main():
     bb_dbase_filename = "./databases/break_bour_db.db"
+    #_log.info('we are about to scrape')
 
     #where the magic happens
     page_link = 'https://breakingbourbon.com/release-list.html'
@@ -57,7 +60,7 @@ def main():
         new_prod_to_email = new_prod_to_email.drop_duplicates(keep='first')
 
         # email the sucker
-        email(new_prod_to_email)
+        email(new_prod_to_email, sender='jkelleypga@gmail.com', reciever= 'jkelleypga@gmail.com')
 
         write_file(new_data = date_updated2)
         
@@ -138,6 +141,7 @@ def scrape_page(page_content):
         month_prods = remove_bottle_label(month_prods)
         # split the list and make df
         dfs = pd.concat([dfs,split_list_prod_prod_desc(month_prods,month_val)], ignore_index=True)
+        #_log.info(f'A total of {dfs.shape[0]} products were on the page')
     return dfs
 
 def check_and_insert(conn, df, cols_to_check = ['product','month'], cols_to_insert = ['product','product_desc','month']):
@@ -153,6 +157,7 @@ def check_and_insert(conn, df, cols_to_check = ['product','month'], cols_to_inse
     --------------
     Nothing data is added to the database
     """
+    _log = logging.getLogger(check_and_insert.__name__)
     curs = conn.cursor()
     
     recs_to_insert = []
@@ -168,11 +173,13 @@ def check_and_insert(conn, df, cols_to_check = ['product','month'], cols_to_inse
         recs_to_insert.append(double_check == None)
     if any(recs_to_insert):
         new_additions = insert_recs[recs_to_insert]
+        _log.info(f'inserted {len(new_additions)} new records')
         for new_add in new_additions:
-            print(new_add)
+            #_log.info(f'New record {new_add}')
         for new_add in new_additions:
             curs.execute("INSERT INTO new_whisky (product, product_desc, month) VALUES(?,?,?)",new_add)
             conn.commit()
+            
     else:
         print('nothing to insert')
 
@@ -271,13 +278,16 @@ def find_new_products(df):
     :Returns
     ------------
     new_df - a new pandas dataframe with just new products"""
+    _log = logging.getLogger(find_new_products.__name__)
     df['date_posted'] = pd.to_datetime(datetime.date.today(), format='%Y-%m-%d')
     df['date_posted'] = df.date_posted.dt.date
     df = df[['date_posted','month','product','product_desc']]
     
     new_df = df[df['product'].str.contains(r'\[new',case = False, regex=True)]
     new_df['product'] = new_df['product'].str.replace(r'\[NEW]','', case = False)
+    _log.info(f'found {new_df.shape[0]} new products')
     return new_df
 
 #run this thang!
 main()
+logging.basicConfig()
