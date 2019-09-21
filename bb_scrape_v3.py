@@ -11,6 +11,7 @@ from sqlite3 import Error
 from sqlite_funcs import *
 from itertools import chain
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import os
@@ -30,6 +31,7 @@ time_of_run = today.strftime("%m/%d/%y %H:%M")
 
 parent = Path().resolve()
 log_file = parent / 'logs' / f'{today_}_bb_scrape.log'
+logfile = parent / 'logs' /'bb_scrape.log'
 
 def main():
     bb_dbase_filename = "./databases/break_bour_db.db"
@@ -64,7 +66,7 @@ def main():
         new_prod_to_email = new_prod_to_email.drop_duplicates(keep='first')
 
         # email the sucker
-        email(new_prod_to_email, sender= os.environ['SENDER'], reciever = os.environ['SENDER'] )
+        email(new_prod_to_email, sender= os.environ['SENDER'], reciever = os.environ['RECIEVER'] )
 
         write_file(new_data = date_updated2)
         
@@ -88,31 +90,36 @@ def read_file(file_name ='last_update.txt', loc = '../webscraping/'):
 
 def email(df, sender = os.environ['SENDER'], reciever = os.environ['RECIEVER']):
     # Create the container (outer) email message.
-    server = smtplib.SMTP('smtp.gmail.com', 587)
-    server.ehlo()
-    server.starttls()
-    server.login(os.environ['GMAIL_UID'], os.environ['GMAIL_SID'])
-    msg = MIMEMultipart('mixed')
-    msg['Subject'] = 'New Breaking Bourbon Release Updates'
-    msg['From'] = sender
-    msg['To'] = reciever
-    msg.preamble = 'New Breaking Bourbon Release Updates'
-    html_message = """\
-    <html>
-        <body>
-        There are new updates to the Breaking Bourbon release calendar! 
-        <br><br>
-        Check out the <a href="http://breakingbourbon.com/release-list.html">release calendar</a>
-        <br><br>
-        </body>
-        </html>
-        """
-    html_part = MIMEText(html_message, 'html')
-    pd_table = MIMEText(df.to_html(index=False),'html')
-    msg.attach(html_part)
-    msg.attach(pd_table)
-    msg.as_string()
-    server.send_message(msg)
+    _log = logging.getLogger(email.__name__)
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.ehlo()
+        server.starttls()
+        server.login(os.environ['GMAIL_UID'], os.environ['GMAIL_SID'])
+        msg = MIMEMultipart('mixed')
+        msg['Subject'] = 'New Breaking Bourbon Release Updates'
+        msg['From'] = sender
+        msg['To'] = reciever
+        msg.preamble = 'New Breaking Bourbon Release Updates'
+        html_message = """\
+        <html>
+            <body>
+            There are new updates to the Breaking Bourbon release calendar! 
+            <br><br>
+            Check out the <a href="http://breakingbourbon.com/release-list.html">release calendar</a>
+            <br><br>
+            </body>
+            </html>
+            """
+        html_part = MIMEText(html_message, 'html')
+        pd_table = MIMEText(df.to_html(index=False),'html')
+        msg.attach(html_part)
+        msg.attach(pd_table)
+        msg.as_string()
+        server.send_message(msg)
+        _log.info(f'email sent')
+    except Exception as e:
+        _log.warning(f'Email was not sent due toe {e}')
 
 def scrape_page(page_content):
     """ This takes in the page content from beautiful soup, scrapes the page and returns a data frame containing date scrape, month of release, product and sub details of product
@@ -296,6 +303,6 @@ def find_new_products(df):
 
 if __name__ == '__main__':
     #run this thang!
-    logger_fmt ='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d -%(message)s'
-    logging.basicConfig(level=logging.INFO,format=logger_fmt, handlers=[logging.FileHandler(log_file)])
+    logger_fmt ='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(message)s'
+    logging.basicConfig(level=logging.INFO,format=logger_fmt, handlers=[TimedRotatingFileHandler(logfile,when='M', interval = 1)])#logging.FileHandler(log_file)
     main()
