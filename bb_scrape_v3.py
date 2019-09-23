@@ -304,5 +304,5 @@ def find_new_products(df):
 if __name__ == '__main__':
     #run this thang!
     logger_fmt ='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(message)s'
-    logging.basicConfig(level=logging.INFO,format=logger_fmt, handlers=[TimedRotatingFileHandler(logfile,when='M', interval = 1)])#logging.FileHandler(log_file)
+    logging.basicConfig(level=logging.INFO,format=logger_fmt, handlers=[TimedRotatingFileHandler(logfile,when='d', interval = 30)])#logging.FileHandler(log_file)
     main()
