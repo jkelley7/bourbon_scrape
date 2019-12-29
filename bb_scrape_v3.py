@@ -38,7 +38,7 @@ def main():
     #_log.info('we are about to scrape')
 
     #where the magic happens
-    page_link = 'https://breakingbourbon.com/release-list.html'
+    page_link = 'https://www.breakingbourbon.com/release-calendar'
     page_response = requests.get(page_link,verify=False, timeout=5)
     page_content = BeautifulSoup(page_response.content, "html.parser")
     date_updated = page_content.find('div',{'class':'desktoptext center'}).getText()
@@ -131,43 +131,63 @@ def scrape_page(page_content):
     ------------
     dfs - a data frame containing date scrapped, month of release, product and sub details of product"""
     _log = logging.getLogger(scrape_page.__name__)
+    
+    invis = re.compile(r'(invisible)')
+    name = []
+    sub_desc = []
+    new_ex = []
     month = []
-    month_prods = []
-    dfs = pd.DataFrame([],columns=['month', 'product','product_desc'])
-    for div in page_content.body.find_all_next('div',{'class':'month-div'}):
-        month_prods = []
-        # get the month name in the review header
-        month_val = div.find_next('div',{'class':'reviewheader'}).get_text(strip=True)
-        month.append(month_val)
-        #find the desktop text as this is where everthing is
-        text_holder = div.find_next('div',{'class':'desktoptext'})
-        month_prods.extend(text_holder.get_text(separator='<br>', strip=True)
-                      #.replace('<br>',',')
-                      .strip(' ')
-                      .split('<br>'))
-        #month_prods = list(chain.from_iterable(month_prods))
-        # remove the u200d label
-        month_prods = remove_u200d(month_prods)
-        # check for zero length strings
-        month_prods = check_list_for_zeros(month_prods)
-        # remove the term bottle labels
-        month_prods = remove_bottle_label(month_prods)
-        # split the list and make df
-        dfs = pd.concat([dfs,split_list_prod_prod_desc(month_prods,month_val)], ignore_index=True)
-    _log.info(f'A total of {dfs.shape[0]} products were on the page')
-    return dfs
+    
+    for container in page_content.body.find_all('div', {'class': "workspace w-container"}):
+        try:
+            cur_working_month = container.find('div', class_='month-div').getText().lower()
+        except:
+            pass
+        for child in container.find_all('div',{'class':'w-dyn-item'}):
+            #Name
+            name.append(child.find('div', {'class':"name-div"}).getText())
+            
+            #sub description
+            try:
+                sub_desc.append(child.find('div', {'class':"calendar-text w-richtext"}).getText())
+            except:
+                sub_desc.append('')
+                
+            #New or expected date
+            hidden_count = []
+            for findhidden in child.find('div', {'class':"name-tag-div"}).children:
+                is_invis = []
+                is_invis.extend([True for i in findhidden['class'] if bool(invis.search(i, re.I))])
+                if sum(is_invis) == 0:
+                    new_ex.append(findhidden.getText())
+                else:
+                    hidden_count.append(True)
+            if sum(hidden_count)>1:
+                new_ex.append('')
+            month.append(cur_working_month)
+    
+    df = pd.DataFrame({'month': month,
+              'product': name,
+              'product_desc': sub_desc,
+              'new':new_ex})
+    
+    _log.info(f'A total of {df.shape[0]} products were on the page')
+    return df
 
 def check_and_insert(conn, df, cols_to_check = ['product','month'], cols_to_insert = ['product','product_desc','month']):
     """Check to see if what we found today has already been added. If it hasn't been added then add it
-    :Params
-    -------------
+    
+    -----------
+    Params
+    -----------
     conn - a connection to a database
     df - a pandas dataframe of new scrapped products
     cols_to_check - cols to check to see if the product is in the database
     cols_to_insert - cols to insert into the database if the product is not in the database
     
-    :returns
-    --------------
+    -----------
+    Returns
+    ------------
     Nothing data is added to the database
     """
     _log = logging.getLogger(check_and_insert.__name__)
@@ -199,7 +219,9 @@ def check_and_insert(conn, df, cols_to_check = ['product','month'], cols_to_inse
 
 def sql_latest_updates(conn,sql):
     """Returns the lastest data"""
+
     data = pd.read_sql(sql,conn)
+    
     return data
 
 def today_query():
@@ -217,88 +239,26 @@ def today_query():
                 date(date_posted) > date('now','-1 day')"""
     return qry_today
 
-def remove_u200d(list_):
-    """Remove u200d values in a list"""
-    list_ = [i.strip('\u200d') for i in list_]
-    return list_
-
-def pop_empties(list_,len_var = 1):
-    """
-    Pops off un-neccasry spaces
-    :Params
-    ---------
-    list_ - a list to cycle thru
-    
-    :returns
-    ---------
-    list_ - your cleaned up list
-    """
-    for idx, ls in enumerate(list_):
-        if len(list_[idx]) <= len_var:
-            list_.pop(idx)
-    return list_
-
-def check_list_for_zeros(list_):
-    """Check list for any string with a length of 0
-    returns:
-    ----------
-    a list"""
-    if len(min(list_,key=len)) <= 1 and len(list_) > 0:
-        return check_list_for_zeros(pop_empties(list_))
-    else:
-        return list_
-
-def remove_bottle_label(list_, removal_val = 'bottlelabel'):
-    """Removes the words bottle label from the list
-    removal value must be one word
-    """
-    for idx, value in enumerate(list_):
-        word = (list_[idx]
-            .lower()
-            .strip(' ')
-            .replace(' ',''))
-        if word == removal_val or word == removal_val + 's' :
-            list_.pop(idx)
-    return list_
-
-def split_list_prod_prod_desc(list_, month):
-    """This takes our list and split it into products and product descriptions"""
-    sub_prod = []
-    for idx, _ in enumerate(list_):
-        if list_[idx][0] == '-':
-            sub_prod.append(list_[idx])
-            list_.pop(idx)
-        elif idx > 0:
-            #product.append(test_prod[idx])
-            sub_prod.append('')
-        else:
-            pass
-
-    dfs = (pd.DataFrame([[month]*len(list_),list_, sub_prod])
-     .T
-     .rename(columns = {0:'month',
-             1:'product',
-             2:'product_desc'})
-    )
-    return dfs
-
 def find_new_products(df):
     """ Take a data frame of all products and find the new products
-    :Params
+    
+    -----------
+    Params
     -----------
     df - a pandas data frame with month, product and product description
     
-    :Returns
+    -----------
+    Returns
     ------------
     new_df - a new pandas dataframe with just new products"""
     _log = logging.getLogger(find_new_products.__name__)
+
     df['date_posted'] = pd.to_datetime(datetime.date.today(), format='%Y-%m-%d')
     df['date_posted'] = df.date_posted.dt.date
-    df = df[['date_posted','month','product','product_desc']]
     
-    new_df = df[df['product'].str.contains(r'\[new',case = False, regex=True)]
-    new_df['product'] = new_df['product'].str.replace(r'\[NEW]','', case = False)
+    new_df = df[df['new'] != '']
     _log.info(f'found {new_df.shape[0]} new products')
+
     return new_df
 
 if __name__ == '__main__':
@@ -306,3 +266,4 @@ if __name__ == '__main__':
     logger_fmt ='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(message)s'
     logging.basicConfig(level=logging.INFO,format=logger_fmt, handlers=[TimedRotatingFileHandler(logfile,when='d', interval = 30)])#logging.FileHandler(log_file)
     main()
+
